@@ -20,7 +20,7 @@ BASE_DIR = r"C:\Bookmark\output"
 REFERENCE_FILE = r"C:\Bookmark\output\Reference Chart Configurations.txt"
 OUTPUT_FILE = os.path.join(BASE_DIR, "visuals_output.json")
 
-GEMINI_API_KEY = "AIzaSyD3I9LHDjDc6quM67o1xdFiZgHZi9qEtj4"
+GEMINI_API_KEY = "AIzaSyD3I9LHDjDc6qu**************"
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -674,4 +674,5 @@ def generate_visuals():
 
 
 if __name__ == "__main__":
+
     generate_visuals()
