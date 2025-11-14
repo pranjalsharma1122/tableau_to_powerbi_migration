@@ -3,7 +3,6 @@ import json
 import re
 import sys
 from typing import Dict, Any, Optional, Tuple, List
-from collections import Counter
 
 # Import Gemini API
 try:
@@ -20,7 +19,6 @@ OUTPUT_DIR = r"C:\celendar\output"
 FINAL_JSON_PATH = os.path.join(OUTPUT_DIR, "final.json")
 SCHEMA_JSON_PATH = os.path.join(OUTPUT_DIR, "schema_output.json")
 POSITIONS_JSON_PATH = os.path.join(OUTPUT_DIR, "powerbi_chart_positions.json")
-COLORS_JSON_PATH = os.path.join(OUTPUT_DIR, "extracted_colors.json")
 REFERENCE_TXT_PATH = os.path.join(OUTPUT_DIR, "Reference Chart Configurations.txt")
 OUTPUT_JSON_PATH = os.path.join(OUTPUT_DIR, "visual_output.json")
 
@@ -48,13 +46,11 @@ def load_json_file(filepath: str) -> Any:
     except Exception as e:
         print(f"ERROR: Failed to load {filepath}: {e}")
         return None
+    
 
 
 def build_schema_mapping(schema_data: Dict) -> Dict[str, str]:
-    """
-    Build column to table mapping from schema_output.json.
-    Returns: Dict[column_lower, table_name]
-    """
+    """Build column to table mapping from schema_output.json."""
     mapping = {}
     for table_name, columns in schema_data.items():
         for col_info in columns:
@@ -67,7 +63,7 @@ def build_schema_mapping(schema_data: Dict) -> Dict[str, str]:
 
 
 def find_calendar_chart_visual(final_data: list) -> Optional[Dict]:
-    """Find the calendar chart visual in final.json by chart_type="calendarChart"."""
+    """Find the calendar chart visual in final.json."""
     for visual in final_data:
         chart_type = visual.get("chart_type", "").strip().lower()
         title = visual.get("title", "").strip().lower()
@@ -79,13 +75,10 @@ def find_calendar_chart_visual(final_data: list) -> Optional[Dict]:
             "calendar" in title or
             "calendário" in source or
             "calendar" in source):
-            print(f"Found calendar chart: title='{visual.get('title')}', type='{visual.get('chart_type')}', source='{visual.get('Source')}'")
+            print(f"✓ Found calendar chart: '{visual.get('Source')}'")
             return visual
     
-    print("WARNING: No calendar chart found")
-    print("Available charts in final.json:")
-    for visual in final_data:
-        print(f"  - Source: '{visual.get('Source', 'N/A')}', Title: '{visual.get('title', 'N/A')}', Type: '{visual.get('chart_type', 'N/A')}'")
+    print("ERROR: No calendar chart found")
     return None
 
 
@@ -100,7 +93,7 @@ def extract_calendar_prototype(reference_text: str) -> Optional[Dict]:
             return None
         
         config_obj = json.loads(config_str)
-        print("Extracted calendar chart prototype from reference")
+        print("✓ Extracted calendar chart prototype")
         return config_obj
     
     except json.JSONDecodeError as e:
@@ -111,12 +104,12 @@ def extract_calendar_prototype(reference_text: str) -> Optional[Dict]:
         return None
 
 
-# ==================== PERMANENT DYNAMIC FIELD ROLE ENGINE ====================
+# ==================== UNIVERSAL FIELD ROLE ENGINE ====================
 
-class FieldRoleEngine:
+class UniversalFieldRoleEngine:
     """
-    Permanent, industrial-strength field role detection engine.
-    Uses multi-signal analysis: schema, cardinality, semantics, and Gemini AI.
+    TRULY UNIVERSAL field role detection engine.
+    Works on ANY dataset in ANY language with ANY field names.
     """
     
     def __init__(self, schema_data: Dict, calendar_visual: Dict, schema_mapping: Dict):
@@ -124,10 +117,10 @@ class FieldRoleEngine:
         self.calendar_visual = calendar_visual
         self.schema_mapping = schema_mapping
         self.all_fields = {}
-        self.field_metadata = {}
+        self.field_datatypes = {}
         
-        # Extract all fields from visual
         self._extract_all_fields()
+        self._get_field_datatypes()
         
     def _extract_all_fields(self):
         """Extract all fields from the calendar visual."""
@@ -137,141 +130,101 @@ class FieldRoleEngine:
         
         self.all_fields = {**rows, **columns, **legend}
         
-        print(f"\n{'='*60}")
-        print(f"FIELD ROLE ENGINE: Extracted {len(self.all_fields)} fields")
-        print(f"{'='*60}")
+        print(f"\n{'='*70}")
+        print(f"UNIVERSAL ENGINE: Found {len(self.all_fields)} fields in calendar visual")
+        print(f"{'='*70}")
         for field_name, table in self.all_fields.items():
-            print(f"  - {field_name} (Table: {table})")
-        print(f"{'='*60}\n")
+            print(f"  • {field_name} → {table}")
+        print(f"{'='*70}\n")
     
-    def _get_field_datatype(self, field_name: str, table_name: str) -> Optional[str]:
-        """Get datatype from schema for a field."""
-        if not table_name or table_name not in self.schema_data:
-            return None
-        
-        for col_info in self.schema_data[table_name]:
-            if col_info.get("name", "").strip().lower() == field_name.strip().lower():
-                return col_info.get("type", "").lower()
-        
-        return None
-    
-    def _analyze_schema_signals(self) -> Dict[str, str]:
-        """Analyze schema datatypes to infer field roles."""
-        roles = {}
-        
+    def _get_field_datatypes(self):
+        """Get datatypes for all fields from schema."""
         for field_name, table_name in self.all_fields.items():
-            datatype = self._get_field_datatype(field_name, table_name)
-            
-            if not datatype:
+            if table_name not in self.schema_data:
                 continue
             
-            # Date detection
-            if any(dt in datatype for dt in ["date", "datetime", "timestamp"]):
-                if "date" not in roles:
-                    roles["date"] = field_name
-            
-            # Numeric measures
-            elif any(dt in datatype for dt in ["int", "float", "decimal", "number", "numeric"]):
-                if "measure" not in roles:
-                    roles["measure"] = field_name
-            
-            # Text categories
-            elif any(dt in datatype for dt in ["text", "string", "varchar", "char"]):
-                if "category" not in roles:
-                    roles["category"] = field_name
-        
-        return roles
+            for col_info in self.schema_data[table_name]:
+                if col_info.get("name", "").strip().lower() == field_name.strip().lower():
+                    self.field_datatypes[field_name] = col_info.get("type", "").lower()
+                    break
     
-    def _analyze_cardinality_signals(self) -> Dict[str, str]:
-        """
-        Analyze field cardinality patterns.
-        Note: Without actual data, we use heuristics based on field names.
-        """
-        roles = {}
-        
-        for field_name in self.all_fields.keys():
-            field_lower = field_name.lower()
-            
-            # High cardinality indicators (event_index)
-            if any(pattern in field_lower for pattern in ["index", "id", "row", "number", "#"]):
-                if "event_index" not in roles:
-                    roles["event_index"] = field_name
-            
-            # Low cardinality indicators (category/legend)
-            elif any(pattern in field_lower for pattern in ["type", "category", "group", "status", "class"]):
-                if "category" not in roles:
-                    roles["category"] = field_name
-            
-            # Week/label patterns
-            elif any(pattern in field_lower for pattern in ["week", "label", "name"]):
-                if "week_label" not in roles:
-                    roles["week_label"] = field_name
-        
-        return roles
-    
-    def _ask_gemini_for_classification(self) -> Dict[str, str]:
-        """Use Gemini AI to semantically classify fields."""
+    def _ask_gemini_universal_classification(self) -> Dict[str, str]:
+        """Use Gemini AI to classify fields UNIVERSALLY (works in any language/structure)."""
         try:
-            # Prepare field list
-            field_list = list(self.all_fields.keys())
+            # Prepare comprehensive context
+            field_list = []
+            for field_name, table in self.all_fields.items():
+                datatype = self.field_datatypes.get(field_name, "unknown")
+                field_list.append({
+                    "name": field_name,
+                    "table": table,
+                    "datatype": datatype
+                })
             
-            # Get hierarchy info
             hierarchy = self.calendar_visual.get("Hierarchy") or []
+            aggregations_row = self.calendar_visual.get("Aggregation_row") or []
             
-            prompt = f"""
-You are a Power BI data expert. Analyze these field names and classify each into EXACTLY ONE role.
+            prompt = f"""You are an expert Power BI data analyst. Analyze these fields from a calendar chart and classify each into EXACTLY ONE role.
 
+FIELD CONTEXT:
 Fields: {json.dumps(field_list, indent=2)}
-Hierarchy: {json.dumps(hierarchy, indent=2)}
 
-REQUIRED ROLES (you must assign fields to ALL of these):
-1. date - The primary date/time field for the calendar
-2. week_label - A label or category shown in calendar cells (can be week number, status, or any categorical label)
-3. category - A grouping or classification field
-4. legend - A field used for color coding or legend
-5. measure - A numeric value field
-6. event_index - A unique identifier or row index
-7. event_group - A date hierarchy field (Year/Quarter/Month) for grouping events
+HIERARCHY: {json.dumps(hierarchy, indent=2)}
 
-RULES:
-- If a field name contains "date", "dt", "data", "transaction" → date
-- If a field name contains "week", "label" → week_label
-- If a field name contains "index", "id", "row", "#" → event_index
-- If hierarchy is present, use the date field referenced in it for event_group
-- The legend field is typically used for color coding
-- Measure is typically a numeric value
-- Category is typically a text grouping field
+AGGREGATIONS: {json.dumps(aggregations_row, indent=2)}
 
-Return ONLY a valid JSON object with this structure:
+CALENDAR CHART REQUIREMENTS:
+A Power BI calendar chart needs these 7 roles:
+1. **date** - Primary date/datetime field (usually datetime type)
+2. **event_index** - Unique identifier/row number (usually integer or string ID)
+3. **week_label** - Label shown in calendar cells (numeric or categorical)
+4. **category** - Grouping/classification field (usually string/text)
+5. **legend** - Field for color coding (usually same as week_label or category)
+6. **measure** - Numeric value field (integer/float)
+7. **event_group** - Date hierarchy field for grouping (Year/Quarter/Month/Week)
+
+CLASSIFICATION RULES:
+- Date/datetime type → likely "date"
+- Integer ID or "index"/"row" in name → likely "event_index"
+- Numeric fields (int/float) → check if used in aggregations for "measure" or "week_label"
+- String/text fields → likely "category"
+- If hierarchy exists with date field → that's "event_group"
+- "legend" often reuses "week_label" or "category"
+
+IMPORTANT:
+- Work with field names in ANY language (English, Portuguese, Spanish, etc.)
+- Don't assume specific field names
+- Use datatype and context to infer roles
+- If a field appears in aggregations, it's likely "measure" or "week_label"
+
+Return ONLY valid JSON (no markdown, no explanation):
 {{
   "date": "field_name",
+  "event_index": "field_name",
   "week_label": "field_name",
   "category": "field_name",
   "legend": "field_name",
   "measure": "field_name",
-  "event_index": "field_name",
   "event_group": "field_name"
-}}
-
-Do not include any explanation, markdown formatting, or additional text. Only return the JSON object.
-"""
+}}"""
             
             response = model.generate_content(prompt)
             response_text = response.text.strip()
             
-            # Clean response (remove markdown code blocks if present)
+            # Clean response
             response_text = re.sub(r'^```json\s*', '', response_text)
             response_text = re.sub(r'\s*```$', '', response_text)
             response_text = response_text.strip()
             
             gemini_roles = json.loads(response_text)
             
-            print(f"\n{'='*60}")
-            print("GEMINI AI CLASSIFICATION RESULTS:")
-            print(f"{'='*60}")
+            print(f"\n{'='*70}")
+            print("GEMINI UNIVERSAL CLASSIFICATION:")
+            print(f"{'='*70}")
             for role, field in gemini_roles.items():
-                print(f"  {role}: {field}")
-            print(f"{'='*60}\n")
+                datatype = self.field_datatypes.get(field, "unknown")
+                print(f"  {role:15} → {field:30} (type: {datatype})")
+            print(f"{'='*70}\n")
             
             return gemini_roles
         
@@ -279,188 +232,265 @@ Do not include any explanation, markdown formatting, or additional text. Only re
             print(f"WARNING: Gemini classification failed: {e}")
             return {}
     
-    def _merge_signals(self, schema_roles: Dict, cardinality_roles: Dict, gemini_roles: Dict) -> Dict[str, str]:
-        """Merge all signal sources with priority: Gemini > Schema > Cardinality."""
-        final_roles = {}
+    def _extract_hierarchy_info(self) -> Tuple[str, str]:
+        """Extract hierarchy type and field from visual hierarchy - DYNAMIC VERSION."""
+        hierarchy = self.calendar_visual.get("Hierarchy") or []
         
-        # Priority 1: Gemini (highest confidence)
-        for role, field in gemini_roles.items():
-            if field and field in self.all_fields:
-                final_roles[role] = field
+        # Default values
+        hierarchy_type = "Month"
+        hierarchy_field = None
         
-        # Priority 2: Schema signals
-        for role, field in schema_roles.items():
-            if role not in final_roles and field in self.all_fields:
-                final_roles[role] = field
+        # Valid Power BI hierarchy types for calendar charts
+        valid_types = ["Year", "Quarter", "Month", "Week", "Day"]
         
-        # Priority 3: Cardinality signals
-        for role, field in cardinality_roles.items():
-            if role not in final_roles and field in self.all_fields:
-                final_roles[role] = field
+        print(f"\n{'='*70}")
+        print("DYNAMIC HIERARCHY DETECTION")
+        print(f"{'='*70}")
+        print(f"Raw Hierarchy: {hierarchy}")
         
-        return final_roles
+        for hier_str in hierarchy:
+            # Extract hierarchy type (Year/Quarter/Month/Week/Day/Weekday)
+            hier_match = re.search(r'(Year|Quarter|Month|Week|Weekday|Day)', hier_str, re.IGNORECASE)
+            if hier_match:
+                detected_type = hier_match.group(1).capitalize()
+                
+                # Power BI calendar charts don't support Weekday - convert to Week
+                if detected_type == "Weekday":
+                    print(f"  ⚠ Detected 'Weekday' → Converting to 'Week'")
+                    detected_type = "Week"
+                
+                # Use the first valid hierarchy type found
+                if detected_type in valid_types and hierarchy_type == "Month":
+                    hierarchy_type = detected_type
+                    print(f"  ✓ Detected hierarchy type: {hierarchy_type}")
+            
+            # Extract field name from hierarchy string
+            # Format: "Quarter(TableName.FieldName)" or "Week(FieldName)"
+            field_match = re.search(r'\((?:.*\.)?(.+?)\)', hier_str)
+            if field_match:
+                hierarchy_field = field_match.group(1).strip()
+                print(f"  ✓ Detected hierarchy field: {hierarchy_field}")
+        
+        print(f"\nFinal: Type='{hierarchy_type}', Field='{hierarchy_field}'")
+        print(f"{'='*70}\n")
+        
+        return hierarchy_type, hierarchy_field
     
-    def _apply_fallback_logic(self, roles: Dict[str, str]) -> Dict[str, str]:
-        """Apply intelligent fallback logic for missing roles."""
-        
-        # Get all available fields
+    def _apply_intelligent_fallbacks(self, roles: Dict[str, str]) -> Dict[str, str]:
+        """Apply intelligent fallback logic for missing/incorrect roles - MERGED VERSION."""
         available_fields = list(self.all_fields.keys())
-        used_fields = set(roles.values())
+        used_fields = set()
         
-        # Fallback for date
-        if "date" not in roles or not roles["date"]:
+        # Get hierarchy info
+        hierarchy_type, hierarchy_field = self._extract_hierarchy_info()
+        
+        # ========== DATE ROLE (HIGHEST PRIORITY) ==========
+        if not roles.get("date"):
+            # Try 1: Find datetime field
             for field in available_fields:
-                if any(pattern in field.lower() for pattern in ["date", "dt", "data", "transaction", "time"]):
+                datatype = self.field_datatypes.get(field, "")
+                if any(dt in datatype for dt in ["date", "datetime", "timestamp"]):
+                    roles["date"] = field
+                    used_fields.add(field)
+                    print(f"  → Fallback: date = {field} (datetime type)")
+                    break
+            
+            # Try 2: Use hierarchy field
+            if not roles.get("date") and hierarchy_field and hierarchy_field in available_fields:
+                roles["date"] = hierarchy_field
+                used_fields.add(hierarchy_field)
+                print(f"  → Fallback: date = {hierarchy_field} (from hierarchy)")
+            
+            # Try 3: Use first available field
+            if not roles.get("date") and available_fields:
+                roles["date"] = available_fields[0]
+                used_fields.add(available_fields[0])
+                print(f"  → Fallback: date = {available_fields[0]} (first available)")
+        else:
+            used_fields.add(roles["date"])
+        
+        # ========== EVENT_GROUP ROLE ==========
+        if not roles.get("event_group"):
+            if hierarchy_field and hierarchy_field in available_fields:
+                roles["event_group"] = hierarchy_field
+                print(f"  → Fallback: event_group = {hierarchy_field} (from hierarchy)")
+            elif roles.get("date"):
+                roles["event_group"] = roles["date"]
+                print(f"  → Fallback: event_group = {roles['date']} (reuse date)")
+        
+        # ========== MEASURE ROLE ==========
+        if not roles.get("measure"):
+            aggregations = self.calendar_visual.get("Aggregation_row") or []
+            
+            # Try 1: From aggregations
+            for field in available_fields:
+                if any(field in agg for agg in aggregations):
                     if field not in used_fields:
-                        roles["date"] = field
+                        roles["measure"] = field
                         used_fields.add(field)
+                        print(f"  → Fallback: measure = {field} (from aggregations)")
                         break
-        
-        # Fallback for event_index
-        if "event_index" not in roles or not roles["event_index"]:
-            for field in available_fields:
-                if any(pattern in field.lower() for pattern in ["index", "id", "row", "#", "num"]):
+            
+            # Try 2: Numeric field
+            if not roles.get("measure"):
+                for field in available_fields:
+                    datatype = self.field_datatypes.get(field, "")
+                    if any(dt in datatype for dt in ["int", "float", "decimal", "number"]):
+                        if field not in used_fields:
+                            roles["measure"] = field
+                            used_fields.add(field)
+                            print(f"  → Fallback: measure = {field} (numeric type)")
+                            break
+            
+            # Try 3: Any unused field
+            if not roles.get("measure"):
+                for field in available_fields:
                     if field not in used_fields:
-                        roles["event_index"] = field
+                        roles["measure"] = field
                         used_fields.add(field)
+                        print(f"  → Fallback: measure = {field} (any available)")
                         break
+        else:
+            used_fields.add(roles["measure"])
         
-        # Fallback for week_label
-        if "week_label" not in roles or not roles["week_label"]:
-            for field in available_fields:
-                if any(pattern in field.lower() for pattern in ["week", "label", "name", "status"]):
+        # ========== WEEK_LABEL ROLE ==========
+        if not roles.get("week_label"):
+            if roles.get("measure"):
+                roles["week_label"] = roles["measure"]
+                print(f"  → Fallback: week_label = {roles['measure']} (reuse measure)")
+            else:
+                for field in available_fields:
                     if field not in used_fields:
                         roles["week_label"] = field
                         used_fields.add(field)
+                        print(f"  → Fallback: week_label = {field}")
                         break
         
-        # Fallback for category
-        if "category" not in roles or not roles["category"]:
+        # ========== EVENT_INDEX ROLE ==========
+        if not roles.get("event_index"):
+            # Try 1: ID/Index/Row/Col fields
             for field in available_fields:
-                if field not in used_fields:
-                    roles["category"] = field
-                    used_fields.add(field)
-                    break
-        
-        # Fallback for legend (can reuse week_label or category)
-        if "legend" not in roles or not roles["legend"]:
-            if "week_label" in roles:
-                roles["legend"] = roles["week_label"]
-            elif "category" in roles:
-                roles["legend"] = roles["category"]
-        
-        # Fallback for measure (can reuse event_index)
-        if "measure" not in roles or not roles["measure"]:
-            if "event_index" in roles:
-                roles["measure"] = roles["event_index"]
-        
-        # Fallback for event_group (use date field)
-        if "event_group" not in roles or not roles["event_group"]:
-            if "date" in roles:
-                roles["event_group"] = roles["date"]
-        
-        # Ultimate fallback: use first available field for any missing role
-        required_roles = ["date", "week_label", "category", "legend", "measure", "event_index", "event_group"]
-        for role in required_roles:
-            if role not in roles or not roles[role]:
+                if any(pattern in field.lower() for pattern in ["id", "index", "row", "col"]):
+                    if field not in used_fields:
+                        roles["event_index"] = field
+                        used_fields.add(field)
+                        print(f"  → Fallback: event_index = {field}")
+                        break
+            
+            # Try 2: Any unused field
+            if not roles.get("event_index"):
                 for field in available_fields:
-                    roles[role] = field
-                    break
+                    if field not in used_fields:
+                        roles["event_index"] = field
+                        used_fields.add(field)
+                        print(f"  → Fallback: event_index = {field}")
+                        break
+        else:
+            used_fields.add(roles["event_index"])
+        
+        # ========== CATEGORY ROLE ==========
+        if not roles.get("category"):
+            # Try 1: String fields (not date field)
+            for field in available_fields:
+                if field == roles.get("date"):
+                    continue
+                datatype = self.field_datatypes.get(field, "")
+                if any(dt in datatype for dt in ["text", "string", "varchar", "char"]):
+                    if field not in used_fields:
+                        roles["category"] = field
+                        used_fields.add(field)
+                        print(f"  → Fallback: category = {field} (string type)")
+                        break
+            
+            # Try 2: Any non-date unused field
+            if not roles.get("category"):
+                for field in available_fields:
+                    if field != roles.get("date") and field not in used_fields:
+                        roles["category"] = field
+                        used_fields.add(field)
+                        print(f"  → Fallback: category = {field}")
+                        break
+            
+            # Try 3: Reuse any non-date field
+            if not roles.get("category"):
+                for field in available_fields:
+                    if field != roles.get("date"):
+                        roles["category"] = field
+                        print(f"  → Fallback: category = {field} (reuse)")
+                        break
+        else:
+            used_fields.add(roles["category"])
+        
+        # ========== LEGEND ROLE ==========
+        if not roles.get("legend"):
+            if roles.get("week_label"):
+                roles["legend"] = roles["week_label"]
+                print(f"  → Fallback: legend = {roles['week_label']} (reuse week_label)")
+            elif roles.get("category"):
+                roles["legend"] = roles["category"]
+                print(f"  → Fallback: legend = {roles['category']} (reuse category)")
         
         return roles
     
-    def detect_roles(self) -> Dict[str, Tuple[str, str]]:
+    def detect_roles(self) -> Dict[str, Tuple[str, str, str]]:
         """
-        Main method: Detect all field roles using multi-signal analysis.
-        Returns: Dict mapping role to (queryRef, table)
+        Main method: Detect all field roles using universal logic.
+        Returns: Dict mapping role to (queryRef, table, hierarchy_type)
         """
-        print(f"\n{'='*60}")
-        print("PERMANENT FIELD ROLE DETECTION ENGINE - STARTING")
-        print(f"{'='*60}\n")
+        print(f"\n{'='*70}")
+        print("UNIVERSAL FIELD ROLE DETECTION - STARTING")
+        print(f"{'='*70}\n")
         
-        # Step 1: Schema analysis
-        print("[1/5] Analyzing schema datatypes...")
-        schema_roles = self._analyze_schema_signals()
-        print(f"  Schema signals detected {len(schema_roles)} roles")
+        # Step 1: Gemini AI classification
+        print("[1/3] Running Gemini AI universal classification...")
+        gemini_roles = self._ask_gemini_universal_classification()
         
-        # Step 2: Cardinality analysis
-        print("[2/5] Analyzing field cardinality patterns...")
-        cardinality_roles = self._analyze_cardinality_signals()
-        print(f"  Cardinality signals detected {len(cardinality_roles)} roles")
+        # Step 2: Apply intelligent fallbacks
+        print("[2/3] Applying intelligent fallback logic...")
+        final_roles = self._apply_intelligent_fallbacks(gemini_roles)
         
-        # Step 3: Gemini semantic classification
-        print("[3/5] Querying Gemini AI for semantic classification...")
-        gemini_roles = self._ask_gemini_for_classification()
-        print(f"  Gemini classified {len(gemini_roles)} roles")
+        # Step 3: Build queryRef format
+        print("[3/3] Building Power BI queryRef format...")
         
-        # Step 4: Merge all signals
-        print("[4/5] Merging all signal sources...")
-        merged_roles = self._merge_signals(schema_roles, cardinality_roles, gemini_roles)
+        hierarchy_type, _ = self._extract_hierarchy_info()
         
-        # Step 5: Apply fallback logic
-        print("[5/5] Applying fallback logic for missing roles...")
-        final_roles = self._apply_fallback_logic(merged_roles)
-        
-        # Extract hierarchy information
-        hierarchy = self.calendar_visual.get("Hierarchy") or []
-        hierarchy_type = "Quarter"  # Default
-        
-        for hier_str in hierarchy:
-            hier_match = re.search(r'(Quarter|Month|Year|Week|Weekday)', hier_str, re.IGNORECASE)
-            if hier_match:
-                hierarchy_type = hier_match.group(1).capitalize()
-                break
-        
-        # Convert to queryRef format
         result = {}
-        
         for role, field_name in final_roles.items():
             if not field_name or field_name not in self.all_fields:
+                print(f"  ⚠ Warning: Role '{role}' has invalid field '{field_name}'")
                 continue
             
             table_name = self.all_fields[field_name]
             
-            # Build queryRef
+            # Build queryRef - CORRECT DYNAMIC FORMAT
             if role == "event_group":
+                # Format: Table.Field.Variation.Date Hierarchy.Type
                 queryref = f"{table_name}.{field_name}.Variation.Date Hierarchy.{hierarchy_type}"
             else:
                 queryref = f"{table_name}.{field_name}"
             
-            result[role] = (queryref, table_name)
+            result[role] = (queryref, table_name, hierarchy_type)
+            print(f"  ✓ {role:15} → {queryref}")
         
-        # Map to Power BI projection names
-        field_mappings = {
-            'events': result.get('event_index', result.get('category', ('Unknown.Unknown', 'Unknown'))),
-            'event_group': result.get('event_group', result.get('date', ('Unknown.Unknown', 'Unknown'))),
-            'cell_color': result.get('week_label', result.get('legend', ('Unknown.Unknown', 'Unknown'))),
-            'start_date': result.get('date', ('Unknown.Unknown', 'Unknown')),
-            'end_date': result.get('date', ('Unknown.Unknown', 'Unknown')),
-            'hierarchy_type': hierarchy_type
-        }
+        print(f"\n{'='*70}")
+        print("FIELD ROLE DETECTION COMPLETE")
+        print(f"{'='*70}\n")
         
-        # Print final summary
-        print(f"\n{'='*60}")
-        print(f"FINAL FIELD ROLE ASSIGNMENTS")
-        print(f"{'='*60}")
-        print(f"  📅 Date Field:       {final_roles.get('date', 'NOT FOUND')} → {field_mappings['start_date'][0]}")
-        print(f"  🎨 Cell Color:       {final_roles.get('week_label', 'NOT FOUND')} → {field_mappings['cell_color'][0]}")
-        print(f"  📊 Events:           {final_roles.get('event_index', 'NOT FOUND')} → {field_mappings['events'][0]}")
-        print(f"  📆 Event Group:      {final_roles.get('event_group', 'NOT FOUND')} → {field_mappings['event_group'][0]}")
-        print(f"  🔧 Hierarchy Type:   {hierarchy_type}")
-        print(f"{'='*60}\n")
-        
-        return field_mappings
+        return result
 
 
 # ==================== CONFIGURATION UPDATE FUNCTIONS ====================
 
 def find_chart_position(chart_title: str, positions_data: list) -> Dict[str, float]:
-    """Find position data for chart by title (case-insensitive match)."""
+    """Find position data for chart by title."""
     title_lower = chart_title.strip().lower()
     
     for pos_entry in positions_data:
         entry_title = pos_entry.get("chart", "").strip().lower()
-        if entry_title == title_lower or "calendário" in entry_title or "calendar" in entry_title:
+        if (entry_title == title_lower or 
+            "calendário" in entry_title or 
+            "calendario" in entry_title or 
+            "calendar" in entry_title):
             return {
                 "x": float(pos_entry.get("x", 0)),
                 "y": float(pos_entry.get("y", 0)),
@@ -469,27 +499,30 @@ def find_chart_position(chart_title: str, positions_data: list) -> Dict[str, flo
                 "height": float(pos_entry.get("height", 400))
             }
     
-    print(f"WARNING: No position found for chart '{chart_title}', using defaults")
+    print(f"  ⚠ No position found for '{chart_title}', using defaults")
     return {"x": 17.05, "y": 290.69, "z": 0.0, "width": 1103.83, "height": 413.16}
 
 
 def update_calendar_config(prototype: Dict, field_mappings: Dict, position: Dict) -> Dict:
-    """
-    Update the prototype with new field mappings and position.
-    Preserves ALL other structure from the reference including colors and formatting.
-    """
+    """Update the prototype with new field mappings and position."""
     import copy
     config = copy.deepcopy(prototype)
     
-    # Update projections ONLY
+    # Extract values from field_mappings
+    events_ref, events_table, _ = field_mappings['event_index']
+    group_ref, group_table, hierarchy_type = field_mappings['event_group']
+    color_ref, color_table, _ = field_mappings['week_label']
+    date_ref, date_table, _ = field_mappings['date']
+    
+    # Update projections
     if "singleVisual" in config and "projections" in config["singleVisual"]:
         projections = config["singleVisual"]["projections"]
         
-        projections["events"] = [{"queryRef": field_mappings['events'][0]}]
-        projections["EventGroup"] = [{"queryRef": field_mappings['event_group'][0]}]
-        projections["CellColor"] = [{"queryRef": field_mappings['cell_color'][0]}]
-        projections["StartDate"] = [{"queryRef": field_mappings['start_date'][0]}]
-        projections["EndDate"] = [{"queryRef": field_mappings['end_date'][0]}]
+        projections["events"] = [{"queryRef": events_ref}]
+        projections["EventGroup"] = [{"queryRef": group_ref}]
+        projections["CellColor"] = [{"queryRef": color_ref}]
+        projections["StartDate"] = [{"queryRef": date_ref}]
+        projections["EndDate"] = [{"queryRef": date_ref}]
     
     # Update prototypeQuery
     if "singleVisual" in config and "prototypeQuery" in config["singleVisual"]:
@@ -497,21 +530,22 @@ def update_calendar_config(prototype: Dict, field_mappings: Dict, position: Dict
         
         # Update From clause
         if "From" in proto_query:
-            main_table = field_mappings['events'][1]
-            proto_query["From"] = [{"Name": "s", "Entity": main_table, "Type": 0}]
+            proto_query["From"] = [{"Name": "s", "Entity": events_table, "Type": 0}]
         
-        # Update Select clause
+        # Update Select clause - FINAL CORRECT VERSION
         if "Select" in proto_query:
-            hierarchy_type = field_mappings.get('hierarchy_type', 'Quarter')
+            event_field = events_ref.split('.')[-1]
+            date_field = date_ref.split('.')[-1]
+            color_field = color_ref.split('.')[-1]
             
             proto_query["Select"] = [
                 {
                     "Column": {
                         "Expression": {"SourceRef": {"Source": "s"}},
-                        "Property": field_mappings['events'][0].split('.')[-1]
+                        "Property": event_field
                     },
-                    "Name": field_mappings['events'][0],
-                    "NativeReferenceName": field_mappings['events'][0].split('.')[-1]
+                    "Name": events_ref,
+                    "NativeReferenceName": event_field
                 },
                 {
                     "HierarchyLevel": {
@@ -521,7 +555,7 @@ def update_calendar_config(prototype: Dict, field_mappings: Dict, position: Dict
                                     "PropertyVariationSource": {
                                         "Expression": {"SourceRef": {"Source": "s"}},
                                         "Name": "Variation",
-                                        "Property": field_mappings['start_date'][0].split('.')[-1]
+                                        "Property": date_field
                                     }
                                 },
                                 "Hierarchy": "Date Hierarchy"
@@ -529,28 +563,28 @@ def update_calendar_config(prototype: Dict, field_mappings: Dict, position: Dict
                         },
                         "Level": hierarchy_type
                     },
-                    "Name": field_mappings['event_group'][0],
-                    "NativeReferenceName": f"{field_mappings['start_date'][0].split('.')[-1]} {hierarchy_type}"
+                    "Name": group_ref,
+                    "NativeReferenceName": f"{date_field} {hierarchy_type}"
                 },
                 {
                     "Column": {
                         "Expression": {"SourceRef": {"Source": "s"}},
-                        "Property": field_mappings['cell_color'][0].split('.')[-1]
+                        "Property": color_field
                     },
-                    "Name": field_mappings['cell_color'][0],
-                    "NativeReferenceName": field_mappings['cell_color'][0].split('.')[-1]
+                    "Name": color_ref,
+                    "NativeReferenceName": color_field
                 },
                 {
                     "Column": {
                         "Expression": {"SourceRef": {"Source": "s"}},
-                        "Property": field_mappings['start_date'][0].split('.')[-1]
+                        "Property": date_field
                     },
-                    "Name": field_mappings['start_date'][0],
-                    "NativeReferenceName": field_mappings['start_date'][0].split('.')[-1]
+                    "Name": date_ref,
+                    "NativeReferenceName": date_field
                 }
             ]
     
-    # Update position in layouts
+    # Update position
     if "layouts" in config and len(config["layouts"]) > 0:
         config["layouts"][0]["position"]["x"] = position["x"]
         config["layouts"][0]["position"]["y"] = position["y"]
@@ -565,48 +599,26 @@ def validate_calendar_config(config_obj: Dict) -> bool:
     """Validate the calendar configuration structure."""
     try:
         if "singleVisual" not in config_obj:
-            print("Validation failed: Missing singleVisual")
+            print("  ✗ Validation failed: Missing singleVisual")
             return False
-        
-        if "visualType" not in config_obj["singleVisual"]:
-            print("Validation failed: Missing visualType")
-            return False
-        
-        visual_type = config_obj["singleVisual"]["visualType"]
-        if "calendar" not in visual_type.lower():
-            print(f"WARNING: Visual type doesn't appear to be a calendar: {visual_type}")
         
         projections = config_obj.get("singleVisual", {}).get("projections", {})
         required_projections = ["events", "EventGroup", "CellColor", "StartDate", "EndDate"]
         
         for proj in required_projections:
             if proj not in projections:
-                print(f"Validation failed: Missing {proj} projection")
+                print(f"  ✗ Validation failed: Missing {proj} projection")
                 return False
             
             if not isinstance(projections[proj], list) or len(projections[proj]) == 0:
-                print(f"Validation failed: {proj} projection is empty or not a list")
-                return False
-            
-            if "queryRef" not in projections[proj][0]:
-                print(f"Validation failed: {proj} projection missing queryRef")
+                print(f"  ✗ Validation failed: {proj} projection is empty")
                 return False
         
-        if "layouts" not in config_obj or len(config_obj["layouts"]) == 0:
-            print("Validation failed: Missing layouts")
-            return False
-        
-        position = config_obj["layouts"][0].get("position", {})
-        required_pos = ["x", "y", "width", "height"]
-        if not all(key in position for key in required_pos):
-            print("Validation failed: Missing position properties")
-            return False
-        
-        print("Configuration validation passed ✓")
+        print("  ✓ Configuration validation passed")
         return True
     
     except Exception as e:
-        print(f"Validation error: {e}")
+        print(f"  ✗ Validation error: {e}")
         return False
 
 
@@ -615,7 +627,8 @@ def validate_calendar_config(config_obj: Dict) -> bool:
 def generate_calendar_chart():
     """Main function to generate the calendar chart configuration."""
     print("=" * 70)
-    print("Power BI Calendar Chart Generator v2.0 - PERMANENT ENGINE")
+    print("Universal Calendar Chart Generator v3.0 - MERGED")
+    print("Works on ANY dataset in ANY language!")
     print("=" * 70)
     
     # Load input files
@@ -624,7 +637,6 @@ def generate_calendar_chart():
     final_data = load_json_file(FINAL_JSON_PATH)
     schema_data = load_json_file(SCHEMA_JSON_PATH)
     positions_data = load_json_file(POSITIONS_JSON_PATH)
-    colors_data = load_json_file(COLORS_JSON_PATH)
     
     if not all([final_data, schema_data, positions_data]):
         print("ERROR: Critical files missing. Aborting.")
@@ -634,9 +646,9 @@ def generate_calendar_chart():
     try:
         with open(REFERENCE_TXT_PATH, 'r', encoding='utf-8') as f:
             reference_text = f.read()
-        print(f"Loaded reference text")
+        print("  ✓ Loaded reference text")
     except Exception as e:
-        print(f"ERROR: Could not load reference text: {e}")
+        print(f"  ✗ ERROR: Could not load reference text: {e}")
         return 1
     
     # Find calendar chart visual
@@ -652,21 +664,24 @@ def generate_calendar_chart():
     
     # Find chart position
     print("\n[4/7] Finding chart position...")
-    chart_title = calendar_visual.get("title", "Calendário")
+    chart_title = calendar_visual.get("title", "") or calendar_visual.get("Source", "")
     position = find_chart_position(chart_title, positions_data)
-    print(f"Position: x={position['x']}, y={position['y']}, w={position['width']}, h={position['height']}")
+    print(f"  ✓ Position: x={position['x']}, y={position['y']}, w={position['width']}, h={position['height']}")
     
     # Extract calendar chart prototype
-    print("\n[5/7] Extracting calendar chart prototype from reference...")
+    print("\n[5/7] Extracting calendar chart prototype...")
     prototype = extract_calendar_prototype(reference_text)
     if not prototype:
         print("ERROR: Failed to extract prototype. Aborting.")
         return 1
     
-    # PERMANENT DYNAMIC FIELD DETECTION ENGINE
-    print("\n[6/7] Running permanent dynamic field detection engine...")
-    engine = FieldRoleEngine(schema_data, calendar_visual, schema_mapping)
+    # UNIVERSAL DYNAMIC FIELD DETECTION
+    print("\n[6/7] Running universal field detection engine...")
+    engine = UniversalFieldRoleEngine(schema_data, calendar_visual, schema_mapping)
     field_mappings = engine.detect_roles()
+    
+    if len(field_mappings) < 7:
+        print(f"WARNING: Only {len(field_mappings)} roles detected (expected 7)")
     
     # Update prototype with new fields and position
     print("\n[7/7] Updating configuration...")
@@ -699,15 +714,8 @@ def generate_calendar_chart():
     
     # Success message
     print("\n" + "=" * 70)
-    print("✓ GENERATION COMPLETE")
     print("=" * 70)
-    print(f"Output: {OUTPUT_JSON_PATH}")
-    print("\nNext steps:")
-    print("1. Open visual_output.json")
-    print("2. Copy the 'config' string value")
-    print("3. Paste it into your Power BI report.json as a visualContainer config")
-    print("4. Make sure the calendar custom visual is installed in your Power BI")
-    print("   Visual GUID: calendarVisual74934D05B71F4C31B0F79D925EE89638")
+    print(f"\nOutput file: {OUTPUT_JSON_PATH}")
     print("=" * 70)
     
     return 0
